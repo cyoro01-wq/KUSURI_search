@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>プライバシーポリシー — くすり検索 KusuriSearch</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;400;600&family=Noto+Sans+JP:wght@300;400;500&display=swap');
+
+  :root {
+    --green: #2d6a4f;
+    --green-light: #40916c;
+    --green-pale: #d8f3dc;
+    --cream: #faf9f6;
+    --ink: #1b2027;
+    --ink-soft: #4a5568;
+    --border: #e2e8e4;
+    --accent: #52b788;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Noto Sans JP', sans-serif;
+    background: var(--cream);
+    color: var(--ink);
+    line-height: 1.9;
+    font-size: 15px;
+    font-weight: 300;
+  }
+
+  /* ヘッダー */
+  header {
+    background: var(--green);
+    color: #fff;
+    padding: 60px 24px 48px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  header::before {
+    content: '';
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 220px; height: 220px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.05);
+  }
+  header::after {
+    content: '';
+    position: absolute;
+    bottom: -40px; left: -40px;
+    width: 160px; height: 160px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.04);
+  }
+  .app-icon {
+    width: 64px; height: 64px;
+    background: #fff;
+    border-radius: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    font-size: 32px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+  }
+  header h1 {
+    font-family: 'Noto Serif JP', serif;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+  header p {
+    font-size: 13px;
+    opacity: 0.75;
+    letter-spacing: 0.06em;
+  }
+
+  /* メイン */
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  .updated {
+    display: inline-block;
+    background: var(--green-pale);
+    color: var(--green);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 12px;
+    border-radius: 20px;
+    margin-bottom: 32px;
+    letter-spacing: 0.04em;
+  }
+
+  .intro {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 40px;
+    color: var(--ink-soft);
+    font-size: 14px;
+  }
+
+  section {
+    margin-bottom: 40px;
+  }
+
+  h2 {
+    font-family: 'Noto Serif JP', serif;
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--green);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  h2 .num {
+    display: inline-flex;
+    width: 26px; height: 26px;
+    background: var(--green);
+    color: #fff;
+    border-radius: 50%;
+    font-size: 12px;
+    font-family: 'Noto Sans JP', sans-serif;
+    font-weight: 500;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  p { color: var(--ink-soft); margin-bottom: 12px; }
+  p:last-child { margin-bottom: 0; }
+
+  /* テーブル */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th {
+    background: var(--green);
+    color: #fff;
+    text-align: left;
+    padding: 10px 14px;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--ink-soft);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:nth-child(even) td { background: #f8fbf9; }
+
+  /* 強調ボックス */
+  .box {
+    background: var(--green-pale);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 16px 0;
+    font-size: 14px;
+    color: var(--green);
+    font-weight: 500;
+  }
+
+  .no-collect {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: var(--ink-soft);
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+  .no-collect::before {
+    content: '✕';
+    color: #c0392b;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .yes-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    color: var(--ink-soft);
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+  .yes-item::before {
+    content: '✓';
+    color: var(--green-light);
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  /* 連絡先 */
+  .contact {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    text-align: center;
+  }
+  .contact a {
+    color: var(--green);
+    text-decoration: none;
+    font-weight: 500;
+    border-bottom: 1px solid var(--accent);
+    padding-bottom: 1px;
+  }
+
+  /* フッター */
+  footer {
+    text-align: center;
+    padding: 24px;
+    font-size: 12px;
+    color: #a0aab4;
+    border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 480px) {
+    header { padding: 40px 16px 32px; }
+    main { padding: 32px 16px 60px; }
+    table { font-size: 13px; }
+    th, td { padding: 8px 10px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="app-icon">💊</div>
+  <h1>くすり検索 — プライバシーポリシー</h1>
+  <p>KusuriSearch Privacy Policy</p>
+</header>
+
+<main>
+  <span class="updated">最終更新日：2026年4月27日</span>
+
+  <div class="intro">
+    本プライバシーポリシーは、植松義幸（以下「開発者」）が提供するiOSアプリ「くすり検索（KusuriSearch）」（以下「本アプリ」）における、利用者の個人情報の取り扱いについて説明するものです。本アプリをご利用いただく前に、必ずお読みください。
+  </div>
+
+  <section>
+    <h2><span class="num">1</span>収集する情報</h2>
+    <p>本アプリが収集・利用する情報は以下のとおりです。</p>
+    <table>
+      <thead>
+        <tr>
+          <th>情報の種類</th>
+          <th>利用目的</th>
+          <th>保存</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>位置情報（使用中のみ）</td>
+          <td>近くの薬局・ドラッグストアを地図上に表示するため</td>
+          <td>しない</td>
+        </tr>
+        <tr>
+          <td>カメラ・写真ライブラリ</td>
+          <td>薬の画像検索機能を使用するため</td>
+          <td>しない</td>
+        </tr>
+        <tr>
+          <td>お気に入りデータ</td>
+          <td>登録した薬をアプリ内に保存するため</td>
+          <td>端末内のみ</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="box">
+      収集したデータはいずれも外部サーバーへ送信されません。位置情報・画像はリアルタイムに処理されるだけで、端末外に保存されることはありません。
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">2</span>収集しない情報</h2>
+    <p>本アプリは以下の情報を一切収集しません。</p>
+    <div class="no-collect">氏名・住所・メールアドレスなどの個人識別情報</div>
+    <div class="no-collect">ユーザーアカウント・ログイン情報</div>
+    <div class="no-collect">検索履歴・閲覧履歴（外部送信は行いません）</div>
+    <div class="no-collect">購入履歴・決済情報</div>
+    <div class="no-collect">端末の識別子・広告ID</div>
+  </section>
+
+  <section>
+    <h2><span class="num">3</span>第三者へのデータ提供</h2>
+    <p>開発者は、利用者の情報を第三者に販売・提供・開示することはありません。</p>
+    <p>本アプリはPMDA（独立行政法人 医薬品医療機器総合機構）が公開するオープンデータを参照しています。利用者の情報をPMDAへ送信することはありません。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">4</span>権限の利用について</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>権限</th>
+          <th>用途</th>
+          <th>任意/必須</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>位置情報（使用中）</td>
+          <td>近くの薬局マップ表示</td>
+          <td>任意</td>
+        </tr>
+        <tr>
+          <td>カメラ</td>
+          <td>薬の撮影による画像検索</td>
+          <td>任意</td>
+        </tr>
+        <tr>
+          <td>写真ライブラリ</td>
+          <td>保存済み写真からの画像検索</td>
+          <td>任意</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>いずれの権限もiOSの設定アプリからいつでも変更・取り消しが可能です。権限を付与しない場合、該当機能は利用できませんが、その他の機能は引き続きご利用いただけます。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">5</span>医療情報について</h2>
+    <p>本アプリに掲載している医薬品情報はPMDAの公開データに基づく参考情報です。以下の点をご了承ください。</p>
+    <div class="yes-item">本アプリは医療行為・診断・処方を行うものではありません</div>
+    <div class="yes-item">薬の服用・中止・変更に関する判断は必ず医師・薬剤師にご相談ください</div>
+    <div class="yes-item">情報の正確性・完全性・最新性を保証するものではありません</div>
+  </section>
+
+  <section>
+    <h2><span class="num">6</span>子どものプライバシー</h2>
+    <p>本アプリは13歳未満の子どもを対象としておらず、意図的に13歳未満の子どもから個人情報を収集することはありません。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">7</span>プライバシーポリシーの変更</h2>
+    <p>本ポリシーは必要に応じて改定されることがあります。重要な変更がある場合は、本ページ上部の「最終更新日」を更新してお知らせします。定期的にご確認いただくことをお勧めします。</p>
+  </section>
+
+  <section>
+    <h2><span class="num">8</span>お問い合わせ</h2>
+    <div class="contact">
+      <p>本プライバシーポリシーに関するご質問・ご意見は、以下のメールアドレスまでお気軽にご連絡ください。</p>
+      <p style="margin-top:12px;">
+        <a href="mailto:your-email@example.com">your-email@example.com</a>
+      </p>
+      <p style="margin-top:8px; font-size:13px; color:#a0aab4;">※メールアドレスはリリース前に正式なものへ変更してください</p>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  &copy; 2026 植松義幸 / KusuriSearch. All rights reserved.
+</footer>
+
+</body>
+</html>
