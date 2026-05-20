@@ -4,33 +4,50 @@ struct ContentView: View {
     @StateObject private var appState = AppState()
     @State private var selectedTab = 0
 
+    // タブバー高さ（コンテンツの下余白計算用）
+    static let tabBarHeight: CGFloat = 60
+
     var body: some View {
         ZStack(alignment: .bottom) {
+            // ── タブコンテンツ ──
+            // .page スタイルは横スクロールと干渉するため使わない
+            // selection バインドで programmatic な切り替えのみ行う
             TabView(selection: $selectedTab) {
                 SearchView()
                     .tag(0)
+                    .safeAreaInset(edge: .bottom) { bottomInset }
 
                 ImageSearchView()
                     .tag(1)
+                    .safeAreaInset(edge: .bottom) { bottomInset }
 
                 PharmacyView()
                     .tag(2)
+                    .safeAreaInset(edge: .bottom) { bottomInset }
 
                 ManufacturerView()
                     .tag(3)
+                    .safeAreaInset(edge: .bottom) { bottomInset }
 
                 FavoritesView()
                     .tag(4)
+                    .safeAreaInset(edge: .bottom) { bottomInset }
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            // tabItem を残しながらバーを非表示にする
+            .toolbar(.hidden, for: .tabBar)
 
-            // カスタムタブバー
+            // ── カスタムタブバー ──
             FriendlyTabBar(selectedTab: $selectedTab, favCount: appState.totalFavCount)
         }
         .environmentObject(appState)
         .preferredColorScheme(appState.themeMode.colorScheme)
         .tint(Color.appPink)
         .ignoresSafeArea(.keyboard)
+    }
+
+    /// タブバー分の透明余白（コンテンツが隠れないように）
+    private var bottomInset: some View {
+        Color.clear.frame(height: Self.tabBarHeight)
     }
 }
 
@@ -127,9 +144,10 @@ struct FriendlyTabBar: View {
     }
 
     private var safeAreaBottom: CGFloat {
+        // iOS 15 以降、windows は非推奨 → keyWindow を使用
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
-            .first?.windows.first?.safeAreaInsets.bottom ?? 0
+            .first?.keyWindow?.safeAreaInsets.bottom ?? 0
     }
 }
 

@@ -50,7 +50,7 @@ struct FavoritesView: View {
                     }
                 }
             }
-            .navigationBarHidden(true)
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(item: $selectedMed) { med in
                 MedicineDetailView(medicine: med)
             }
