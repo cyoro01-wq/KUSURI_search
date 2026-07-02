@@ -5,7 +5,7 @@ struct ContentView: View {
     @State private var selectedTab = 0
 
     // タブバー高さ（コンテンツの下余白計算用）
-    static let tabBarHeight: CGFloat = 60
+    static let tabBarHeight: CGFloat = 68
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -21,16 +21,20 @@ struct ContentView: View {
                     .tag(1)
                     .safeAreaInset(edge: .bottom) { bottomInset }
 
-                PharmacyView()
+                InteractionCheckerView()
                     .tag(2)
                     .safeAreaInset(edge: .bottom) { bottomInset }
 
-                ManufacturerView()
+                PharmacyView()
                     .tag(3)
                     .safeAreaInset(edge: .bottom) { bottomInset }
 
-                FavoritesView()
+                ManufacturerView()
                     .tag(4)
+                    .safeAreaInset(edge: .bottom) { bottomInset }
+
+                FavoritesView()
+                    .tag(5)
                     .safeAreaInset(edge: .bottom) { bottomInset }
             }
             // tabItem を残しながらバーを非表示にする
@@ -60,13 +64,14 @@ struct FriendlyTabBar: View {
     private let items: [(icon: String, activeIcon: String, label: String)] = [
         ("magnifyingglass",          "magnifyingglass",              "薬を調べる"),
         ("camera",                   "camera.fill",                  "画像検索"),
+        ("pills.circle",             "pills.circle.fill",            "のみ合わせ"),
         ("mappin.and.ellipse",       "mappin.and.ellipse",           "薬局を探す"),
         ("building.2",               "building.2.fill",              "メーカー"),
         ("heart",                    "heart.fill",                   "お気に入り")
     ]
 
     private let activeColors: [Color] = [
-        .appPink, .appTeal, .appPurple, .appIndigo, .appPink
+        .appPink, .appTeal, .appOrange, .appPurple, .appIndigo, .appPink
     ]
 
     var body: some View {
@@ -77,7 +82,7 @@ struct FriendlyTabBar: View {
         }
         .padding(.horizontal, 8)
         .padding(.top, 10)
-        .padding(.bottom, safeAreaBottom)
+        .padding(.bottom, 8)
         .background(
             Rectangle()
                 .fill(.ultraThinMaterial)
@@ -88,7 +93,11 @@ struct FriendlyTabBar: View {
                               : Color.white.opacity(0.4))
                 )
                 .shadow(color: Color.black.opacity(0.08), radius: 16, x: 0, y: -4)
+                // ホームインジケーター領域まで背景を伸ばし、
+                // バー下に隙間ができてタップが背後のコンテンツへ抜けるのを防ぐ
+                .ignoresSafeArea(edges: .bottom)
         )
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: selectedTab)
     }
 
     @ViewBuilder
@@ -98,9 +107,9 @@ struct FriendlyTabBar: View {
         let color = activeColors[index]
 
         Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                selectedTab = index
-            }
+            // withAnimation で selection を変えると TabView 側の切替と干渉して
+            // 表示が乱れるため、選択は即時反映しインジケーターのみアニメーションする
+            selectedTab = index
         } label: {
             VStack(spacing: 4) {
                 ZStack {
@@ -120,7 +129,7 @@ struct FriendlyTabBar: View {
                             .scaleEffect(isSelected ? 1.1 : 1.0)
 
                         // バッジ（お気に入り）
-                        if index == 4 && favCount > 0 {
+                        if index == items.count - 1 && favCount > 0 {
                             Text("\(min(favCount, 99))")
                                 .font(.system(size: 9, weight: .bold))
                                 .foregroundColor(.white)
@@ -139,15 +148,9 @@ struct FriendlyTabBar: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    private var safeAreaBottom: CGFloat {
-        // iOS 15 以降、windows は非推奨 → keyWindow を使用
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first?.keyWindow?.safeAreaInsets.bottom ?? 0
     }
 }
 

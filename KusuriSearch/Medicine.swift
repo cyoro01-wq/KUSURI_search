@@ -15,6 +15,8 @@ struct Medicine: Identifiable, Codable {
     let dosageForm: String?
     let imprintCodes: [String]
     let tags: [String]
+    /// ネット上で取り上げられている話題・備考（参考情報）
+    let webTopics: [String]
     let rx: Bool
     let pricing: Pricing
     let interactions: [Interaction]
@@ -35,6 +37,7 @@ struct Medicine: Identifiable, Codable {
         case dosageForm
         case imprintCodes
         case tags
+        case webTopics
         case rx
         case pricing
         case interactions
@@ -56,6 +59,7 @@ struct Medicine: Identifiable, Codable {
         dosageForm: String? = nil,
         imprintCodes: [String] = [],
         tags: [String],
+        webTopics: [String] = [],
         rx: Bool,
         pricing: Pricing,
         interactions: [Interaction],
@@ -75,6 +79,7 @@ struct Medicine: Identifiable, Codable {
         self.dosageForm = dosageForm
         self.imprintCodes = imprintCodes
         self.tags = tags
+        self.webTopics = webTopics
         self.rx = rx
         self.pricing = pricing
         self.interactions = interactions
@@ -97,6 +102,7 @@ struct Medicine: Identifiable, Codable {
         dosageForm = try container.decodeIfPresent(String.self, forKey: .dosageForm)
         imprintCodes = try container.decodeIfPresent([String].self, forKey: .imprintCodes) ?? []
         tags = try container.decode([String].self, forKey: .tags)
+        webTopics = try container.decodeIfPresent([String].self, forKey: .webTopics) ?? []
         rx = try container.decode(Bool.self, forKey: .rx)
         pricing = try container.decode(Pricing.self, forKey: .pricing)
         interactions = try container.decode([Interaction].self, forKey: .interactions)
@@ -119,6 +125,7 @@ struct Medicine: Identifiable, Codable {
         try container.encodeIfPresent(dosageForm, forKey: .dosageForm)
         try container.encode(imprintCodes, forKey: .imprintCodes)
         try container.encode(tags, forKey: .tags)
+        try container.encode(webTopics, forKey: .webTopics)
         try container.encode(rx, forKey: .rx)
         try container.encode(pricing, forKey: .pricing)
         try container.encode(interactions, forKey: .interactions)
@@ -246,7 +253,13 @@ let baseMedicines: [Medicine] = [
         id: 1, name: "ロキソプロフェンNa錠60mg", kana: "ろきそぷろふぇんな",
         genericName: "ロキソプロフェンナトリウム水和物", brandName: "ロキソニン",
         category: "解熱鎮痛消炎剤", maker: "第一三共",
-        tags: ["鎮痛", "解熱", "消炎", "NSAIDs"], rx: true,
+        tags: ["鎮痛", "解熱", "消炎", "NSAIDs"],
+        webTopics: [
+            "市販薬「ロキソニンS」と主成分が同じことが比較記事でよく取り上げられる",
+            "空腹時に飲むと胃を痛めやすいという注意喚起がSNSで繰り返し話題になる",
+            "貼り薬の「ロキソニンテープ」も知名度が高く、飲み薬との使い分けが解説されることが多い",
+            "頭痛薬・生理痛薬としてイブ（イブプロフェン）やカロナールとの違いが頻繁に検索されている"
+        ], rx: true,
         pricing: Medicine.Pricing(
             brand: .init(name: "ロキソニン錠60mg", price: 10.10, maker: "第一三共"),
             generics: [
@@ -314,7 +327,13 @@ let baseMedicines: [Medicine] = [
         id: 2, name: "アムロジピンベシル酸塩錠5mg", kana: "あむろじぴん",
         genericName: "アムロジピンベシル酸塩", brandName: "ノルバスク",
         category: "カルシウム拮抗薬", maker: "ヴィアトリス製薬",
-        tags: ["降圧薬", "狭心症", "CCB", "Ca拮抗薬"], rx: true,
+        tags: ["降圧薬", "狭心症", "CCB", "Ca拮抗薬"],
+        webTopics: [
+            "グレープフルーツとの飲み合わせNGの代表例としてネット記事・SNSで頻繁に紹介される",
+            "日本で最も処方されている降圧薬のひとつとして健康系メディアで取り上げられる",
+            "ジェネリック（アムロジピン）の普及率が高く、薬代の節約例としてよく挙げられる",
+            "「足のむくみ」が出やすい副作用として体験談・Q&Aサイトで話題になりやすい"
+        ], rx: true,
         pricing: Medicine.Pricing(
             brand: .init(name: "ノルバスク錠5mg", price: 36.30, maker: "ヴィアトリス製薬"),
             generics: [
@@ -379,7 +398,13 @@ let baseMedicines: [Medicine] = [
         id: 3, name: "セチリジン塩酸塩錠10mg", kana: "せちりじん",
         genericName: "セチリジン塩酸塩", brandName: "ジルテック",
         category: "抗ヒスタミン薬", maker: "UCBジャパン",
-        tags: ["抗アレルギー", "花粉症", "蕁麻疹", "H1拮抗薬"], rx: false,
+        tags: ["抗アレルギー", "花粉症", "蕁麻疹", "H1拮抗薬"],
+        webTopics: [
+            "同成分の市販薬（ストナリニZ・コンタック鼻炎Zなど）が薬局で買えると紹介されることが多い",
+            "改良型の「ザイザル（レボセチリジン）」との違いが花粉症シーズンによく検索される",
+            "第2世代の中では効き目が強い一方、眠気も出やすいという比較記事が定番",
+            "花粉が飛び始める前からの「初期療法」が効果的という情報が毎年話題になる"
+        ], rx: false,
         pricing: Medicine.Pricing(
             brand: .init(name: "ジルテック錠10mg", price: 21.00, maker: "UCBジャパン"),
             generics: [
@@ -441,7 +466,13 @@ let baseMedicines: [Medicine] = [
         id: 4, name: "オメプラゾール錠20mg", kana: "おめぷらぞーる",
         genericName: "オメプラゾール", brandName: "オメプラール",
         category: "プロトンポンプ阻害薬（PPI）", maker: "太陽ファルマ",
-        tags: ["胃潰瘍", "逆流性食道炎", "PPI", "胃酸抑制"], rx: true,
+        tags: ["胃潰瘍", "逆流性食道炎", "PPI", "胃酸抑制"],
+        webTopics: [
+            "PPIの長期服用リスク（骨折・低マグネシウム血症など）を扱う健康記事で頻繁に言及される",
+            "新しいタイプの「タケキャブ（P-CAB）」との効き方の違いが比較記事でよく取り上げられる",
+            "ピロリ菌除菌治療のセット薬の一つとして解説されることが多い",
+            "後発品が先発品より高い「薬価逆転」の珍しい例として話題になった"
+        ], rx: true,
         pricing: Medicine.Pricing(
             brand: .init(name: "オメプラール錠20mg", price: 33.60, maker: "太陽ファルマ"),
             generics: [

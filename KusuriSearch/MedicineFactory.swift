@@ -69,7 +69,7 @@ extension Medicine {
         name: String, kana: String,
         genericName: String, brandName: String,
         category: String, maker: String,
-        tags: [String], rx: Bool,
+        tags: [String], webTopics: [String] = [], rx: Bool,
         makerURLString: String? = nil,
         photoURLString: String? = nil,
         dosageForm: String? = nil,
@@ -99,7 +99,7 @@ extension Medicine {
         Medicine(
             id: id, name: name, kana: kana,
             genericName: genericName, brandName: brandName,
-            category: category, maker: maker, makerURLString: makerURLString ?? manufacturerURL(for: maker), packageInsertURLString: nil, photoURLString: photoURLString, dosageForm: dosageForm, imprintCodes: imprintCodes, tags: tags, rx: rx,
+            category: category, maker: maker, makerURLString: makerURLString ?? manufacturerURL(for: maker), packageInsertURLString: nil, photoURLString: photoURLString, dosageForm: dosageForm, imprintCodes: imprintCodes, tags: tags, webTopics: webTopics, rx: rx,
             pricing: Pricing(
                 brand: .init(name: brandPriceName ?? "\(brandName) \(unit)", price: brandPrice, maker: maker),
                 generics: generics.map { .init(name: $0.name, price: $0.price, maker: $0.maker) },

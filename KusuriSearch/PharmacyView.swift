@@ -213,7 +213,7 @@ struct PharmacyView: View {
                     ContentUnavailableView(
                         "薬局を検索しましょう",
                         systemImage: "cross.vial",
-                        description: Text("現在地または地名・駅名で\n近くの調剤薬局を探せます")
+                        description: Text("現在地または地名・駅名で\n近くの調剤薬局・ドラッグストアを探せます")
                     )
                     .onTapGesture {
                         queryFieldFocused = false
@@ -280,22 +280,51 @@ struct PharmacyView: View {
     }
 
     func searchMKLocal(near coord: CLLocationCoordinate2D, label: String) async {
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = "調剤薬局"
-        request.region = MKCoordinateRegion(center: coord,
-            latitudinalMeters: 2000, longitudinalMeters: 2000)
         let userLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-        do {
-            let response = try await MKLocalSearch(request: request).start()
-            var results = response.mapItems.map { Pharmacy.from(mapItem: $0, userLocation: userLoc) }
-            results.sort { ($0.distance ?? 999) < ($1.distance ?? 999) }
-            pharmacies = results
-            if results.isEmpty {
-                locationErrorMessage = "「\(label)」周辺で薬局が見つかりませんでした。"
+        let searchRegion = MKCoordinateRegion(center: coord,
+            latitudinalMeters: 2000, longitudinalMeters: 2000)
+
+        // 単独の調剤薬局だけでなく、ドラッグストア併設の調剤薬局も拾えるように
+        // 複数キーワードで並列検索して結果を統合する
+        // MKMapItem は Sendable でないためタスク内で Pharmacy に変換して返す
+        let keywords = ["調剤薬局", "薬局", "ドラッグストア"]
+        let candidates = await withTaskGroup(of: [Pharmacy].self) { group in
+            for keyword in keywords {
+                group.addTask {
+                    let request = MKLocalSearch.Request()
+                    request.naturalLanguageQuery = keyword
+                    request.region = searchRegion
+                    request.resultTypes = .pointOfInterest
+                    guard let items = (try? await MKLocalSearch(request: request).start())?.mapItems else {
+                        return []
+                    }
+                    return items.map { Pharmacy.from(mapItem: $0, userLocation: userLoc) }
+                }
             }
-        } catch {
-            pharmacies = []
-            locationErrorMessage = "薬局検索に失敗しました。通信状況を確認して再度お試しください。"
+            var all: [Pharmacy] = []
+            for await items in group {
+                all += items
+            }
+            return all
+        }
+
+        // 同じ店舗が複数キーワードでヒットするため、名前 + 位置（約10m単位）で重複排除
+        var seen: Set<String> = []
+        var results: [Pharmacy] = []
+        for pharmacy in candidates {
+            let key = [
+                pharmacy.name,
+                String(format: "%.4f", pharmacy.coordinate.latitude),
+                String(format: "%.4f", pharmacy.coordinate.longitude)
+            ].joined(separator: "|")
+            guard seen.insert(key).inserted else { continue }
+            results.append(pharmacy)
+        }
+        results.sort { ($0.distance ?? 999) < ($1.distance ?? 999) }
+
+        pharmacies = results
+        if results.isEmpty {
+            locationErrorMessage = "「\(label)」周辺で薬局が見つかりませんでした。"
         }
         region = MKCoordinateRegion(center: coord, span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02))
         loading = false; searched = true

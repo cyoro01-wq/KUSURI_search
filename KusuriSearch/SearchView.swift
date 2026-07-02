@@ -5,6 +5,7 @@ struct SearchView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var medicineRepository = MedicineRepository.shared
     @State private var query = ""
+    @State private var debouncedQuery = ""
     @State private var selectedCategory = "すべて"
     @State private var rxFilter = "all"
     @State private var selectedMed: Medicine? = nil
@@ -13,11 +14,7 @@ struct SearchView: View {
     @FocusState private var searchFieldFocused: Bool
 
     var categories: [String] {
-        let available = medicineRepository.allMedicines
-            .map(\.category)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return ["すべて"] + Array(Set(available)).sorted { lhs, rhs in
+        ["すべて"] + medicineRepository.availableCategories.sorted { lhs, rhs in
             categorySortKey(lhs) < categorySortKey(rhs)
         }
     }
@@ -26,23 +23,17 @@ struct SearchView: View {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    var filtered: [Medicine] {
-        let q = trimmedQuery
-            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: Locale(identifier: "ja_JP"))
-            .lowercased()
-        return medicineRepository.allMedicines.filter { m in
-            let matchQ = q.isEmpty
-                || medicineRepository.searchableText(for: m).contains(q)
-            let matchC = selectedCategory == "すべて"
-                || m.category == selectedCategory
-            let matchR = rxFilter == "all"
-                || (rxFilter == "rx" && m.rx)
-                || (rxFilter == "otc" && !m.rx)
-            return matchQ && matchC && matchR
-        }
+    private func matchesFilters(_ m: Medicine) -> Bool {
+        let matchC = selectedCategory == "すべて" || m.category == selectedCategory
+        let matchR = rxFilter == "all"
+            || (rxFilter == "rx" && m.rx)
+            || (rxFilter == "otc" && !m.rx)
+        return matchC && matchR
     }
 
     var body: some View {
+        let outcome = medicineRepository.searchResults(for: debouncedQuery)
+        let filtered = outcome.medicines.filter { matchesFilters($0) }
         NavigationStack {
             ZStack {
                 SoftAppBackground()
@@ -205,13 +196,23 @@ struct SearchView: View {
                     if filtered.isEmpty {
                         emptyStateView
                     } else {
-                        resultListView
+                        resultListView(results: filtered, showFuzzyNote: outcome.usedFuzzy)
                     }
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
             .contentShape(Rectangle())
             .onTapGesture { searchFieldFocused = false }
+            .task(id: query) {
+                // 入力中の連続フィルタリングを避けるデバウンス
+                let trimmed = trimmedQuery
+                guard trimmed != debouncedQuery else { return }
+                if !trimmed.isEmpty {
+                    try? await Task.sleep(for: .milliseconds(150))
+                    guard !Task.isCancelled else { return }
+                }
+                debouncedQuery = trimmed
+            }
             .sheet(item: $selectedMed) { med in
                 MedicineDetailView(medicine: med)
             }
@@ -274,11 +275,11 @@ struct SearchView: View {
     }
 
     // MARK: - 結果リスト
-    private var resultListView: some View {
+    private func resultListView(results: [Medicine], showFuzzyNote: Bool) -> some View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 HStack {
-                    Text("\(filtered.count) 件")
+                    Text("\(results.count) 件")
                         .font(.caption2).fontWeight(.bold)
                         .foregroundColor(.appTextSecondary)
                         .padding(.horizontal, 10).padding(.vertical, 4)
@@ -289,7 +290,23 @@ struct SearchView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
 
-                ForEach(filtered) { med in
+                if showFuzzyNote {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkle.magnifyingglass")
+                            .font(.caption)
+                            .foregroundColor(.appIndigo)
+                        Text("もしかして：「\(trimmedQuery)」に近い名前のおくすりを表示しています")
+                            .font(.caption)
+                            .foregroundColor(.appTextSecondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Color.appIndigo.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 16)
+                }
+
+                ForEach(results) { med in
                     FriendlyMedicineCard(med: med)
                         .padding(.horizontal, 16)
                         .contentShape(Rectangle())

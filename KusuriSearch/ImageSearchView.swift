@@ -42,39 +42,36 @@ struct AnalysisResult {
 
 enum MedicineAnalyzer {
     static func analyze(image: UIImage) async -> AnalysisResult {
-        guard let cgImage = image.cgImage else {
+        guard let prepared = preparedImage(from: image) else {
             return AnalysisResult(detectedTexts: [], barcodes: [], searchQueries: [], matches: [])
         }
-        async let texts    = extractText(cgImage)
-        async let barcodes = detectBarcodes(cgImage)
+        async let texts    = extractText(prepared.cgImage, orientation: prepared.orientation)
+        async let barcodes = detectBarcodes(prepared.cgImage, orientation: prepared.orientation)
         let (t, b) = await (texts, barcodes)
         let medicines = await MainActor.run { MedicineRepository.shared.allMedicines }
         let queries = prioritizedQueries(texts: t, barcodes: b)
         let preferredQueries = queries.filter(isMedicineSearchQuery(_:))
 
-        if !preferredQueries.isEmpty {
-            let remoteMatches = await searchRemoteMedicines(using: preferredQueries)
-            if !remoteMatches.isEmpty {
-                let localMatches = searchMedicines(using: preferredQueries, medicines: medicines)
-                let mergedMatches = mergeMatches(primary: remoteMatches, secondary: localMatches)
-                return AnalysisResult(detectedTexts: t, barcodes: b, searchQueries: queries, matches: mergedMatches)
-            }
-        }
-
+        // まず端末内DBを照合し、確度の高い一致（名称・識別コードの完全一致）が
+        // あれば通信せずに即時返す
         let directMatches = searchMedicines(using: queries, medicines: medicines)
-        if !directMatches.isEmpty {
-            return AnalysisResult(detectedTexts: t, barcodes: b, searchQueries: queries, matches: directMatches)
+        if let best = directMatches.first, best.score >= 8.0 {
+            return AnalysisResult(
+                detectedTexts: t,
+                barcodes: b,
+                searchQueries: queries,
+                matches: mergeMatches(primary: directMatches, secondary: [])
+            )
         }
 
         let fuzzyMatches = matchMedicines(texts: t, barcodes: b, medicines: medicines)
-        if !fuzzyMatches.isEmpty {
-            let remoteMatches = await searchRemoteMedicines(using: preferredQueries.isEmpty ? queries : preferredQueries)
-            let mergedMatches = mergeMatches(primary: remoteMatches, secondary: fuzzyMatches)
-            return AnalysisResult(detectedTexts: t, barcodes: b, searchQueries: queries, matches: mergedMatches)
-        }
+        let localMatches = mergeMatches(primary: directMatches, secondary: fuzzyMatches)
 
         let remoteMatches = await searchRemoteMedicines(using: preferredQueries.isEmpty ? queries : preferredQueries)
-        return AnalysisResult(detectedTexts: t, barcodes: b, searchQueries: queries, matches: remoteMatches)
+        let mergedMatches = remoteMatches.isEmpty
+            ? localMatches
+            : mergeMatches(primary: remoteMatches, secondary: localMatches)
+        return AnalysisResult(detectedTexts: t, barcodes: b, searchQueries: queries, matches: mergedMatches)
     }
 
     static func searchDetectedText(_ text: String, preserving result: AnalysisResult) async -> AnalysisResult {
@@ -103,30 +100,63 @@ enum MedicineAnalyzer {
         )
     }
 
+    /// Vision へ渡す画像を用意する。巨大画像は解析が極端に遅くなるため縮小し、
+    /// 撮影向き（EXIF orientation）も引き継いで認識精度を保つ。
+    private static func preparedImage(from image: UIImage) -> (cgImage: CGImage, orientation: CGImagePropertyOrientation)? {
+        guard let cgImage = image.cgImage else { return nil }
+
+        let maxDimension: CGFloat = 2000
+        let pixelSize = CGSize(width: image.size.width * image.scale,
+                               height: image.size.height * image.scale)
+        let largest = max(pixelSize.width, pixelSize.height)
+        guard largest > maxDimension else {
+            return (cgImage, CGImagePropertyOrientation(image.imageOrientation))
+        }
+
+        let ratio = maxDimension / largest
+        let newSize = CGSize(width: pixelSize.width * ratio, height: pixelSize.height * ratio)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let resized = UIGraphicsImageRenderer(size: newSize, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+        guard let resizedCG = resized.cgImage else {
+            return (cgImage, CGImagePropertyOrientation(image.imageOrientation))
+        }
+        // draw(in:) は向きを正規化して描画するため orientation は .up になる
+        return (resizedCG, .up)
+    }
+
     // OCR（日本語 + 英語）
-    private static func extractText(_ cg: CGImage) async -> [String] {
+    private static func extractText(_ cg: CGImage, orientation: CGImagePropertyOrientation) async -> [String] {
         await withCheckedContinuation { cont in
-            let req = VNRecognizeTextRequest { req, _ in
-                let texts = (req.results as? [VNRecognizedTextObservation] ?? [])
-                    .compactMap { $0.topCandidates(1).first?.string }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let req = VNRecognizeTextRequest()
+                req.recognitionLevel       = .accurate
+                req.recognitionLanguages   = ["ja-JP", "en-US"]
+                req.usesLanguageCorrection = true
+                try? VNImageRequestHandler(cgImage: cg, orientation: orientation).perform([req])
+
+                // 信頼度の低い読み取り結果はノイズになるため除外する
+                let texts = (req.results ?? []).compactMap { observation -> String? in
+                    guard let candidate = observation.topCandidates(1).first,
+                          candidate.confidence >= 0.3 else { return nil }
+                    return candidate.string
+                }
                 cont.resume(returning: texts)
             }
-            req.recognitionLevel       = .accurate
-            req.recognitionLanguages   = ["ja-JP", "en-US"]
-            req.usesLanguageCorrection = true
-            try? VNImageRequestHandler(cgImage: cg).perform([req])
         }
     }
 
     // バーコード検出
-    private static func detectBarcodes(_ cg: CGImage) async -> [String] {
+    private static func detectBarcodes(_ cg: CGImage, orientation: CGImagePropertyOrientation) async -> [String] {
         await withCheckedContinuation { cont in
-            let req = VNDetectBarcodesRequest { req, _ in
-                let codes = (req.results as? [VNBarcodeObservation] ?? [])
-                    .compactMap { $0.payloadStringValue }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let req = VNDetectBarcodesRequest()
+                try? VNImageRequestHandler(cgImage: cg, orientation: orientation).perform([req])
+                let codes = (req.results ?? []).compactMap { $0.payloadStringValue }
                 cont.resume(returning: codes)
             }
-            try? VNImageRequestHandler(cgImage: cg).perform([req])
         }
     }
 
@@ -293,29 +323,60 @@ enum MedicineAnalyzer {
     }
 
     private static func searchRemoteMedicines(using queries: [String]) async -> [MedicineMatch] {
-        var matches: [MedicineMatch] = []
-        var seen: Set<String> = []
+        let candidates = Array(queries.filter(shouldUseForRemoteSearch(_:)).prefix(3))
+        guard !candidates.isEmpty else { return [] }
 
-        for (index, query) in queries.prefix(6).enumerated() {
-            guard shouldUseForRemoteSearch(query) else { continue }
-            do {
-                let medicine = try await PMDAService.fetchTemporaryMedicine(named: query)
-                let dedupeKey = normalizeToken(medicine.brandName + medicine.genericName)
-                guard !dedupeKey.isEmpty, !seen.contains(dedupeKey) else { continue }
-                seen.insert(dedupeKey)
-                matches.append(
-                    MedicineMatch(
-                        medicine: medicine,
-                        score: max(5.5, 9.0 - Double(index)),
-                        matchedKeywords: [query]
-                    )
-                )
-            } catch {
-                continue
+        // 逐次アクセスは待ち時間が長くなるため候補クエリを並列で照会し、
+        // 応答の遅いクエリはタイムアウトで打ち切る
+        let fetched = await withTaskGroup(of: (index: Int, query: String, medicine: Medicine)?.self) { group in
+            for (index, query) in candidates.enumerated() {
+                group.addTask {
+                    guard let medicine = try? await withTimeout(seconds: 12, operation: {
+                        try await PMDAService.fetchTemporaryMedicine(named: query)
+                    }) else { return nil }
+                    return (index, query, medicine)
+                }
             }
+
+            var results: [(index: Int, query: String, medicine: Medicine)] = []
+            for await value in group {
+                if let value { results.append(value) }
+            }
+            return results
         }
 
+        var matches: [MedicineMatch] = []
+        var seen: Set<String> = []
+        for entry in fetched.sorted(by: { $0.index < $1.index }) {
+            let dedupeKey = normalizeToken(entry.medicine.brandName + entry.medicine.genericName)
+            guard !dedupeKey.isEmpty, seen.insert(dedupeKey).inserted else { continue }
+            matches.append(
+                MedicineMatch(
+                    medicine: entry.medicine,
+                    score: max(5.5, 9.0 - Double(entry.index)),
+                    matchedKeywords: [entry.query]
+                )
+            )
+        }
         return matches
+    }
+
+    private static func withTimeout<T: Sendable>(
+        seconds: Double,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw CancellationError()
+            }
+            guard let result = try await group.next() else {
+                throw CancellationError()
+            }
+            group.cancelAll()
+            return result
+        }
     }
 
     private static func mergeMatches(primary: [MedicineMatch], secondary: [MedicineMatch]) -> [MedicineMatch] {
@@ -832,6 +893,527 @@ struct ApiKeySheet: View {
                     Button("閉じる") { dismiss() }
                 }
             }
+        }
+    }
+}
+
+// MARK: - 飲み合わせチェッカー
+
+struct InteractionFinding: Identifiable {
+    let id = UUID()
+    let pairLabel: String
+    let severity: String
+    let title: String
+    let detail: String
+    let advice: String
+}
+
+enum InteractionChecker {
+    /// 選択された薬のすべての組み合わせをチェックし、重い順に返す
+    static func check(_ medicines: [Medicine]) -> [InteractionFinding] {
+        var findings: [InteractionFinding] = []
+        for i in medicines.indices {
+            for j in medicines.indices where j > i {
+                findings += check(medicines[i], medicines[j])
+            }
+        }
+        return dedup(findings).sorted { severityRank($0.severity) < severityRank($1.severity) }
+    }
+
+    static func severityRank(_ severity: String) -> Int {
+        switch severity {
+        case "禁忌": return 0
+        case "重大": return 1
+        case "中等度": return 2
+        case "注意": return 3
+        case "軽度": return 4
+        default: return 5
+        }
+    }
+
+    private static func check(_ a: Medicine, _ b: Medicine) -> [InteractionFinding] {
+        var findings: [InteractionFinding] = []
+        let pair = "\(a.brandName) × \(b.brandName)"
+
+        // 1. 同じ有効成分の重複（気づきにくく危険度が高い）
+        if sameIngredient(a, b) {
+            findings.append(.init(
+                pairLabel: pair,
+                severity: "重大",
+                title: "同じ成分の重複",
+                detail: "どちらも有効成分が「\(a.genericName)」の薬です。両方を一緒に飲むと効きすぎや副作用のリスクが高まります。",
+                advice: "同じ成分の薬を重ねて飲まないでください。別々の病院・薬局でもらった薬の場合は、必ず医師・薬剤師に伝えてください。"
+            ))
+        } else if sameCategory(a, b) {
+            // 2. 同じ分類の薬の重複
+            findings.append(.init(
+                pairLabel: pair,
+                severity: "注意",
+                title: "同じ分類の薬の重複",
+                detail: "どちらも「\(a.category)」に分類される薬です。似た作用が重なる可能性があります。",
+                advice: "2つを併用してよいか、医師・薬剤師に確認してください。"
+            ))
+        }
+
+        // 3. 登録済みの相互作用データと照合（双方向）
+        findings += registeredFindings(of: a, against: b, pair: pair)
+        findings += registeredFindings(of: b, against: a, pair: pair)
+
+        // 4. 注意文言に相手の薬の名前が含まれていないか
+        findings += textFindings(of: a, against: b, pair: pair)
+        findings += textFindings(of: b, against: a, pair: pair)
+
+        return findings
+    }
+
+    private static func registeredFindings(of a: Medicine, against b: Medicine, pair: String) -> [InteractionFinding] {
+        a.interactions.compactMap { interaction in
+            guard matches(interaction.drug, medicine: b) else { return nil }
+            return InteractionFinding(
+                pairLabel: pair,
+                severity: interaction.severity,
+                title: "\(a.brandName) の相互作用情報: \(interaction.drug)",
+                detail: interaction.mechanism,
+                advice: interaction.action
+            )
+        }
+    }
+
+    /// 相互作用の相手（薬名または分類名）が指定の薬に該当するか
+    private static func matches(_ interactionDrug: String, medicine: Medicine) -> Bool {
+        let target = normalize(interactionDrug)
+        guard !target.isEmpty else { return false }
+
+        // 薬名での一致
+        let names = [medicine.brandName, medicine.genericName, medicine.name, medicine.kana]
+            .map(normalize)
+            .filter { $0.count >= 3 }
+        if names.contains(where: { target.contains($0) || $0.contains(target) }) {
+            return true
+        }
+
+        // 分類名での一致（例: 「ACE阻害薬・ARB」 と category「ARB」）
+        let category = normalize(medicine.category)
+        if category.count >= 2, target.contains(category) {
+            return true
+        }
+
+        // タグでの一致
+        if medicine.tags.map(normalize).contains(where: { $0.count >= 3 && target.contains($0) }) {
+            return true
+        }
+
+        return false
+    }
+
+    private static func textFindings(of a: Medicine, against b: Medicine, pair: String) -> [InteractionFinding] {
+        let combined = normalize(
+            ([a.general.interactionWarning] + a.pro.contraindications + a.pro.monitoring)
+                .joined(separator: "\n")
+        )
+        guard !combined.isEmpty else { return [] }
+
+        let bNames = [b.brandName, b.genericName, b.name]
+            .map(normalize)
+            .filter { $0.count >= 3 }
+        guard bNames.contains(where: { combined.contains($0) }) else { return [] }
+
+        return [InteractionFinding(
+            pairLabel: pair,
+            severity: "注意",
+            title: "\(a.brandName) の注意書きに関連する記載",
+            detail: "\(a.brandName)の注意文の中に、\(b.brandName)（またはその成分名）に関する記載があります。",
+            advice: "\(a.brandName)の詳細ページや添付文書で内容を確認し、薬剤師に相談してください。"
+        )]
+    }
+
+    private static func sameIngredient(_ a: Medicine, _ b: Medicine) -> Bool {
+        let ga = normalize(a.genericName)
+        let gb = normalize(b.genericName)
+        guard ga.count >= 3, gb.count >= 3 else { return false }
+        return ga == gb || ga.contains(gb) || gb.contains(ga)
+    }
+
+    private static func sameCategory(_ a: Medicine, _ b: Medicine) -> Bool {
+        let ca = normalize(a.category)
+        let cb = normalize(b.category)
+        guard !ca.isEmpty, ca == cb else { return false }
+        // 情報の少ない汎用カテゴリは重複判定に使わない
+        let generic = ["医薬品", "医療用医薬品", "一般用医薬品"].map(normalize)
+        return !generic.contains(ca)
+    }
+
+    private static func dedup(_ findings: [InteractionFinding]) -> [InteractionFinding] {
+        var seen: Set<String> = []
+        return findings.filter { finding in
+            let key = [finding.pairLabel, finding.severity, normalize(finding.title)].joined(separator: "|")
+            return seen.insert(key).inserted
+        }
+    }
+
+    private static func normalize(_ text: String) -> String {
+        text
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: Locale(identifier: "ja_JP"))
+            .replacingOccurrences(of: #"[\s（）()「」・,、]"#, with: "", options: .regularExpression)
+            .lowercased()
+    }
+}
+
+// MARK: - InteractionCheckerView
+
+struct InteractionCheckerView: View {
+    @EnvironmentObject var appState: AppState
+    @ObservedObject private var medicineRepository = MedicineRepository.shared
+    @State private var selected: [Medicine] = []
+    @State private var query = ""
+    @State private var showPhotoSheet = false
+    @FocusState private var searchFocused: Bool
+
+    private let maxCount = 3
+
+    private var suggestions: [Medicine] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        let selectedIDs = Set(selected.map(\.id))
+        return medicineRepository.searchResults(for: trimmed).medicines
+            .filter { !selectedIDs.contains($0.id) }
+            .prefix(6)
+            .map { $0 }
+    }
+
+    private var findings: [InteractionFinding] {
+        selected.count >= 2 ? InteractionChecker.check(selected) : []
+    }
+
+    private var overallBanner: (label: String, note: String, color: Color, icon: String) {
+        if findings.contains(where: { ["禁忌", "重大"].contains($0.severity) }) {
+            return ("危険な飲み合わせの可能性があります",
+                    "自己判断で併用せず、必ず医師・薬剤師に相談してください。",
+                    .appRed, "exclamationmark.octagon.fill")
+        }
+        if !findings.isEmpty {
+            return ("注意が必要な飲み合わせがあります",
+                    "下の内容を確認し、心配な点は薬剤師に相談してください。",
+                    .appOrange, "exclamationmark.triangle.fill")
+        }
+        return ("登録データでは問題は見つかりませんでした",
+                "すべての飲み合わせを網羅しているわけではありません。お薬手帳を持って薬剤師にご確認ください。",
+                .appGreen, "checkmark.seal.fill")
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+
+                    // ── 説明バナー ─────────────────────────
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "pills.circle.fill")
+                            .foregroundColor(.appOrange).font(.title3)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("のみ合わせをチェックします").font(.caption).fontWeight(.bold)
+                            Text("2〜3種類の薬を選ぶと、成分の重複や登録されている相互作用情報を照合して警告します。写真からの追加もできます。")
+                                .font(.caption2).foregroundColor(.secondary).lineSpacing(3)
+                        }
+                    }
+                    .padding(12)
+                    .background(Color.appOrange.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.appOrange.opacity(0.3), lineWidth: 1))
+
+                    // ── 選択済みの薬 ────────────────────────
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("チェックする薬（\(selected.count)/\(maxCount)）", systemImage: "checklist")
+                            .font(.caption).fontWeight(.bold).foregroundColor(.secondary)
+
+                        if selected.isEmpty {
+                            Text("下の検索欄または「写真から追加」で薬を選んでください。")
+                                .font(.caption).foregroundColor(.secondary)
+                                .padding(.vertical, 8)
+                        }
+
+                        ForEach(Array(selected.enumerated()), id: \.element.id) { index, med in
+                            HStack(spacing: 10) {
+                                Text("\(index + 1)")
+                                    .font(.caption).fontWeight(.bold)
+                                    .foregroundColor(.white)
+                                    .frame(width: 22, height: 22)
+                                    .background(Circle().fill(Color.appTeal))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 6) {
+                                        Text(med.brandName).font(.subheadline).fontWeight(.semibold)
+                                        RxBadge(rx: med.rx)
+                                    }
+                                    Text(med.name).font(.caption2).foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Button {
+                                    selected.removeAll { $0.id == med.id }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(Color(.systemGray3))
+                                        .font(.title3)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(10)
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+
+                    // ── 薬の追加 ────────────────────────────
+                    if selected.count < maxCount {
+                        VStack(spacing: 8) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                                TextField("薬の名前で検索して追加", text: $query)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                                    .focused($searchFocused)
+                                if !query.isEmpty {
+                                    Button { query = "" } label: {
+                                        Image(systemName: "xmark.circle.fill").foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                            .padding(10)
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                            ForEach(suggestions) { med in
+                                Button {
+                                    selected.append(med)
+                                    query = ""
+                                    searchFocused = false
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "plus.circle.fill")
+                                            .foregroundColor(.appTeal)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(med.brandName).font(.subheadline)
+                                            Text(med.name).font(.caption2).foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                        RxBadge(rx: med.rx)
+                                    }
+                                    .padding(10)
+                                    .background(Color(.secondarySystemGroupedBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                }
+                                .buttonStyle(.plain)
+                            }
+
+                            Button {
+                                searchFocused = false
+                                showPhotoSheet = true
+                            } label: {
+                                Label("写真から追加（パッケージやシートを撮影）", systemImage: "camera.viewfinder")
+                                    .font(.subheadline).fontWeight(.semibold)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(12)
+                                    .background(Color.appTeal.opacity(0.12))
+                                    .foregroundColor(.appTeal)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                        }
+                    }
+
+                    // ── 判定結果 ────────────────────────────
+                    if selected.count >= 2 {
+                        let banner = overallBanner
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(banner.label, systemImage: banner.icon)
+                                .font(.subheadline).fontWeight(.bold)
+                                .foregroundColor(banner.color)
+                            Text(banner.note)
+                                .font(.caption).foregroundColor(.appTextSecondary).lineSpacing(3)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(14)
+                        .background(banner.color.opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(banner.color.opacity(0.4), lineWidth: 1))
+
+                        ForEach(findings) { finding in
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text(finding.pairLabel)
+                                        .font(.caption).fontWeight(.bold)
+                                        .foregroundColor(.appTextSecondary)
+                                    Spacer()
+                                    SeverityBadge(severity: finding.severity)
+                                }
+                                Text(finding.title)
+                                    .font(.subheadline).fontWeight(.semibold)
+                                Text(finding.detail)
+                                    .font(.caption).foregroundColor(.appTextSecondary).lineSpacing(3)
+                                HStack(alignment: .top, spacing: 6) {
+                                    Image(systemName: "lightbulb.fill")
+                                        .font(.caption2).foregroundColor(.appBlue)
+                                        .padding(.top, 2)
+                                    Text(finding.advice)
+                                        .font(.caption).foregroundColor(.appBlue).lineSpacing(3)
+                                }
+                            }
+                            .padding(12)
+                            .background(Color(.secondarySystemGroupedBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.interactionColor(finding.severity).opacity(0.35), lineWidth: 1)
+                            )
+                        }
+                    } else if selected.count == 1 {
+                        Text("もう1種類以上追加するとチェックできます。")
+                            .font(.caption).foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 8)
+                    }
+
+                    DisclaimerBox()
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("💊 のみ合わせ")
+            .sheet(isPresented: $showPhotoSheet) {
+                CheckerPhotoSheet { medicine in
+                    if !selected.contains(where: { $0.id == medicine.id }), selected.count < maxCount {
+                        selected.append(medicine)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - CheckerPhotoSheet（写真から薬を追加）
+
+private struct CheckerPhotoSheet: View {
+    let onPick: (Medicine) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var photoItem: PhotosPickerItem? = nil
+    @State private var image: UIImage? = nil
+    @State private var showCamera = false
+    @State private var analyzing = false
+    @State private var matches: [MedicineMatch] = []
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 14) {
+                    HStack(spacing: 12) {
+                        PhotosPicker(selection: $photoItem, matching: .images) {
+                            PickerButton(icon: "photo.on.rectangle", label: "ライブラリから選択")
+                        }
+                        Button { showCamera = true } label: {
+                            PickerButton(icon: "camera", label: "カメラで撮影")
+                        }
+                        .foregroundColor(.primary)
+                    }
+
+                    if let image {
+                        Image(uiImage: image)
+                            .resizable().scaledToFit()
+                            .frame(maxHeight: 200)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+
+                    if analyzing {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("解析中...").font(.caption).foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 8)
+                    }
+
+                    if !matches.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("見つかった薬（タップして追加）", systemImage: "checkmark.seal.fill")
+                                .font(.caption).fontWeight(.bold).foregroundColor(.secondary)
+                            ForEach(matches.prefix(5)) { match in
+                                Button {
+                                    onPick(match.medicine)
+                                    dismiss()
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "plus.circle.fill").foregroundColor(.appTeal)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(match.medicine.brandName).font(.subheadline)
+                                            Text(match.medicine.name).font(.caption2).foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                        Text(match.confidenceLabel)
+                                            .font(.caption2).fontWeight(.bold)
+                                            .padding(.horizontal, 8).padding(.vertical, 3)
+                                            .background(match.confidenceColor.opacity(0.15))
+                                            .foregroundColor(match.confidenceColor)
+                                            .clipShape(Capsule())
+                                    }
+                                    .padding(10)
+                                    .background(Color(.secondarySystemGroupedBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    } else if image != nil && !analyzing {
+                        Text("薬を特定できませんでした。名前が写るように撮り直してみてください。")
+                            .font(.caption).foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.vertical, 8)
+                    }
+                }
+                .padding()
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("写真から薬を追加")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("閉じる") { dismiss() }
+                }
+            }
+            .onChange(of: photoItem) { _, item in
+                Task {
+                    if let data = try? await item?.loadTransferable(type: Data.self),
+                       let img = UIImage(data: data) {
+                        image = img
+                    }
+                }
+            }
+            .onChange(of: image) { _, img in
+                guard let img else { return }
+                Task { await analyze(img) }
+            }
+            .sheet(isPresented: $showCamera) {
+                CameraView(image: $image, onCapture: {})
+            }
+        }
+    }
+
+    private func analyze(_ img: UIImage) async {
+        analyzing = true
+        matches = []
+        let result = await MedicineAnalyzer.analyze(image: img)
+        matches = result.matches
+        analyzing = false
+    }
+}
+
+private extension CGImagePropertyOrientation {
+    init(_ orientation: UIImage.Orientation) {
+        switch orientation {
+        case .up:            self = .up
+        case .upMirrored:    self = .upMirrored
+        case .down:          self = .down
+        case .downMirrored:  self = .downMirrored
+        case .left:          self = .left
+        case .leftMirrored:  self = .leftMirrored
+        case .right:         self = .right
+        case .rightMirrored: self = .rightMirrored
+        @unknown default:    self = .up
         }
     }
 }

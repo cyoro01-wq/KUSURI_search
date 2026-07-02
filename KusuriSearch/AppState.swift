@@ -55,7 +55,11 @@ class AppState: ObservableObject {
     }
 
     func toggleMed(_ medicine: Medicine) {
-        MedicineRepository.shared.upsert(medicine)
+        // upsert はソート・全インデックス再構築・圧縮保存を伴う重い処理のため、
+        // 未収載薬（リモート取得した一時データ）の登録時のみ実行する
+        if MedicineRepository.shared.medicine(for: medicine.id) == nil {
+            MedicineRepository.shared.upsert(medicine)
+        }
         toggleMed(medicine.id)
     }
 

@@ -23,8 +23,9 @@ struct MedicineDetailView: View {
                         ProModeToggle(isOn: $proMode)
                             .padding(.horizontal)
 
+                        // 今どちらの説明を見ているかを明示するバッジ
                         if proMode {
-                            Label("医療従事者モード", systemImage: "cross.case.fill")
+                            Label("医療従事者モード｜添付文書に基づく専門情報", systemImage: "cross.case.fill")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(Color.appIndigo)
                                 .padding(.horizontal, 12)
@@ -34,6 +35,18 @@ struct MedicineDetailView: View {
                                 .overlay(
                                     Capsule()
                                         .stroke(Color.appIndigo.opacity(0.18), lineWidth: 1)
+                                )
+                        } else {
+                            Label("やさしい説明モード｜患者さん・ご家族向け", systemImage: "heart.text.square.fill")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.appGreen)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color.white.opacity(0.92))
+                                .clipShape(Capsule())
+                                .overlay(
+                                    Capsule()
+                                        .stroke(Color.appGreen.opacity(0.18), lineWidth: 1)
                                 )
                         }
 
@@ -46,6 +59,11 @@ struct MedicineDetailView: View {
                             ProDetailView(medicine: currentMedicine)
                         } else {
                             GeneralDetailView(medicine: currentMedicine)
+                        }
+
+                        if !currentMedicine.webTopics.isEmpty {
+                            WebTopicsSection(topics: currentMedicine.webTopics)
+                                .padding(.horizontal)
                         }
 
                         DisclaimerBox().padding(.horizontal)
@@ -89,6 +107,34 @@ struct MedicineDetailView: View {
             displayedMedicine = enriched
         } catch {
             displayedMedicine = nil
+        }
+    }
+}
+
+// MARK: - WebTopicsSection（ネットでの話題・備考）
+private struct WebTopicsSection: View {
+    let topics: [String]
+
+    var body: some View {
+        SectionBox(title: "ネットでの話題・備考", accentColor: .appTeal) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(topics, id: \.self) { topic in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "bubble.left.fill")
+                            .font(.caption2)
+                            .foregroundColor(.appTeal)
+                            .padding(.top, 3)
+                        Text(topic)
+                            .font(.subheadline)
+                            .lineSpacing(3)
+                    }
+                }
+
+                Text("※ ニュース・SNS等で広く取り上げられている内容をまとめた参考情報です。医学的な判断は医師・薬剤師にご確認ください。")
+                    .font(.caption2)
+                    .foregroundColor(.appTextSecondary)
+                    .padding(.top, 4)
+            }
         }
     }
 }
@@ -912,20 +958,37 @@ struct GeneralDetailView: View {
     let medicine: Medicine
     var g: Medicine.GeneralInfo { medicine.general }
 
+    // 一般向け表示では医療用語をやさしい表現に言い換える（元データは変更しない）
+    private var whatIsItText: String { PlainLanguage.simplify(g.whatIsIt) }
+    private var howToTakeText: String { PlainLanguage.simplify(g.howToTake) }
+    private var interactionText: String { PlainLanguage.simplify(g.interactionWarning) }
+    private var dailyLifeItems: [String] { g.dailyLife.map(PlainLanguage.simplify) }
+
+    // 画面に表示される文章に含まれる医療用語を集めて解説する
+    private var glossaryEntries: [PlainLanguage.GlossaryEntry] {
+        let combined = (
+            [whatIsItText, howToTakeText, interactionText]
+            + dailyLifeItems
+            + g.sideEffects.flatMap { [PlainLanguage.simplify($0.name), PlainLanguage.simplify($0.detail)] }
+            + g.qa.flatMap { [$0.q, PlainLanguage.simplify($0.a)] }
+        ).joined(separator: " ")
+        return PlainLanguage.glossaryEntries(in: combined)
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             SectionBox(title: "この薬はどんな薬？", accentColor: .appGreen) {
-                ReadableTextBlock(text: g.whatIsIt, icon: "checkmark.circle.fill", color: .appGreen)
+                ReadableTextBlock(text: whatIsItText, icon: "checkmark.circle.fill", color: .appGreen)
             }.padding(.horizontal)
 
             SectionBox(title: usageSectionTitle(for: medicine), accentColor: .appGreen) {
-                ReadableTextBlock(text: g.howToTake, icon: usageSectionIcon(for: medicine), color: .appGreen)
+                ReadableTextBlock(text: howToTakeText, icon: usageSectionIcon(for: medicine), color: .appGreen)
             }.padding(.horizontal)
 
             VStack(alignment: .leading, spacing: 8) {
                 Label("飲み合わせで注意が必要な薬", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).fontWeight(.bold).foregroundColor(.appOrange)
-                ReadableTextBlock(text: g.interactionWarning, icon: "exclamationmark.circle.fill", color: .appOrange)
+                ReadableTextBlock(text: interactionText, icon: "exclamationmark.circle.fill", color: .appOrange)
             }
             .padding(14)
             .background(Color.appYellow.opacity(0.12))
@@ -939,8 +1002,8 @@ struct GeneralDetailView: View {
                         HStack(alignment: .top, spacing: 12) {
                             Text(se.icon).font(.title2)
                             VStack(alignment: .leading, spacing: 3) {
-                            Text(se.name).font(.subheadline).fontWeight(.semibold)
-                                Text(se.detail).font(.caption).foregroundColor(.appTextSecondary).lineSpacing(3)
+                            Text(PlainLanguage.simplify(se.name)).font(.subheadline).fontWeight(.semibold)
+                                Text(PlainLanguage.simplify(se.detail)).font(.caption).foregroundColor(.appTextSecondary).lineSpacing(3)
                             }
                         }
                         .padding(.vertical, 10)
@@ -951,7 +1014,7 @@ struct GeneralDetailView: View {
 
             SectionBox(title: "日常生活での注意点", accentColor: .appBlue) {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(g.dailyLife, id: \.self) { dl in
+                    ForEach(dailyLifeItems, id: \.self) { dl in
                         Label(dl, systemImage: "checkmark.square.fill")
                             .font(.subheadline)
                             .symbolRenderingMode(.palette)
@@ -966,12 +1029,114 @@ struct GeneralDetailView: View {
                     ForEach(g.qa) { qa in
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Q. \(qa.q)").font(.subheadline).fontWeight(.bold).foregroundColor(.appPurple)
-                            Text("A. \(qa.a)").font(.subheadline).lineSpacing(4).padding(.leading, 8)
+                            Text("A. \(PlainLanguage.simplify(qa.a))").font(.subheadline).lineSpacing(4).padding(.leading, 8)
                         }
                     }
                 }
             }.padding(.horizontal)
+
+            if !glossaryEntries.isEmpty {
+                SectionBox(title: "むずかしい用語のやさしい解説", accentColor: .appTeal) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(glossaryEntries, id: \.term) { entry in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(entry.term)
+                                    .font(.caption).fontWeight(.bold)
+                                    .foregroundColor(.appTeal)
+                                    .padding(.horizontal, 8).padding(.vertical, 3)
+                                    .background(Color.appTeal.opacity(0.12))
+                                    .clipShape(Capsule())
+                                Text(entry.meaning)
+                                    .font(.caption)
+                                    .lineSpacing(3)
+                            }
+                        }
+                        Text("※ この説明ページに出てくる用語を自動でピックアップしています。")
+                            .font(.caption2)
+                            .foregroundColor(.appTextSecondary)
+                            .padding(.top, 2)
+                    }
+                }.padding(.horizontal)
+            }
         }
+    }
+}
+
+// MARK: - PlainLanguage（一般向け表示のやさしい日本語化）
+enum PlainLanguage {
+    struct GlossaryEntry {
+        let term: String
+        let meaning: String
+        var aliases: [String] = []
+    }
+
+    /// 一般向け表示専用の言い換え。長い語から順に置換する。
+    /// 医療者向け表示と保存データには適用しない。
+    private static let replacements: [(String, String)] = [
+        ("経口投与する", "口から飲みます"),
+        ("経口投与", "口から飲むこと"),
+        ("投与すること", "使うこと"),
+        ("投与する", "使います"),
+        ("投与量", "使う量"),
+        ("投与間隔", "使う間隔"),
+        ("投与", "使用"),
+        ("悪心", "吐き気"),
+        ("嘔吐", "おう吐"),
+        ("傾眠", "強い眠気"),
+        ("浮腫", "むくみ"),
+        ("そう痒感", "かゆみ"),
+        ("掻痒感", "かゆみ"),
+        ("そう痒", "かゆみ"),
+        ("掻痒", "かゆみ"),
+        ("倦怠感", "だるさ")
+    ]
+
+    static func simplify(_ text: String) -> String {
+        var result = text
+        for (from, to) in replacements {
+            result = result.replacingOccurrences(of: from, with: to)
+        }
+        return result
+    }
+
+    /// 一般向けページに残る医療用語のやさしい解説
+    private static let glossary: [GlossaryEntry] = [
+        .init(term: "禁忌", meaning: "「この薬を使ってはいけない」と決められている人や状態のことです。"),
+        .init(term: "併用", meaning: "ほかの薬と一緒に使うことです。「併用禁忌」は一緒に使ってはいけない組み合わせを指します。"),
+        .init(term: "相互作用", meaning: "薬どうしや、薬と食べ物・飲み物が影響し合って、効き目が強くなったり弱くなったりすることです。"),
+        .init(term: "頓用（頓服）", meaning: "毎日決まって飲むのではなく、症状が出たときだけ使う飲み方です。", aliases: ["頓用", "頓服"]),
+        .init(term: "服用", meaning: "薬を飲むことです。「1日3回服用」なら1日3回飲むという意味です。"),
+        .init(term: "添付文書", meaning: "国のルールに基づいて作られる、薬の公式な説明書です。"),
+        .init(term: "用法・用量", meaning: "薬の使い方（タイミング・回数）と、1回に使う量のことです。", aliases: ["用法及び用量", "用法用量"]),
+        .init(term: "効能・効果", meaning: "その薬がどんな病気や症状に使えるか、ということです。", aliases: ["効能又は効果"]),
+        .init(term: "後発品（ジェネリック）", meaning: "先に発売された薬（先発品）と同じ有効成分で作られた、価格が安めの薬です。", aliases: ["後発品", "ジェネリック"]),
+        .init(term: "先発品", meaning: "最初に開発・発売された薬（いわゆるブランド品）です。"),
+        .init(term: "薬価", meaning: "国が定めた薬の公定価格です。"),
+        .init(term: "重篤", meaning: "命に関わるおそれがあるほど重い状態のことです。"),
+        .init(term: "過敏症", meaning: "薬に対するアレルギーのような過剰な反応のことです。"),
+        .init(term: "アナフィラキシー", meaning: "全身に急に起こる強いアレルギー反応です。じんましん・息苦しさなどが急に出たら、すぐに医療機関を受診してください。"),
+        .init(term: "間質性肺炎", meaning: "肺に炎症が起こる重い副作用です。空せき・息切れ・発熱が続くときは医師に相談してください。"),
+        .init(term: "肝機能障害", meaning: "肝臓のはたらきが悪くなることです。強いだるさや、皮膚・白目が黄色くなる症状がサインです。"),
+        .init(term: "腎機能障害", meaning: "腎臓のはたらきが悪くなることです。", aliases: ["腎障害"]),
+        .init(term: "血中濃度", meaning: "血液の中にふくまれる薬の量のことです。"),
+        .init(term: "半減期", meaning: "体の中の薬の量が半分に減るまでの時間で、薬が抜ける速さの目安です。"),
+        .init(term: "発疹", meaning: "皮膚にできる赤みやぶつぶつのことです。"),
+        .init(term: "おう吐", meaning: "吐いてしまうことです。", aliases: ["嘔吐"]),
+        .init(term: "消化性潰瘍", meaning: "胃や十二指腸の内側が傷ついた状態（胃潰瘍・十二指腸潰瘍）のことです。", aliases: ["胃潰瘍", "十二指腸潰瘍"]),
+        .init(term: "血小板減少", meaning: "血を固める成分（血小板）が減って、出血しやすくなることです。"),
+        .init(term: "徐脈", meaning: "脈がゆっくりになりすぎることです。"),
+        .init(term: "頻脈", meaning: "脈が速くなりすぎることです。"),
+        .init(term: "頻度不明", meaning: "どれくらいの割合で起こるか、はっきりわかっていないという意味です。"),
+        .init(term: "授乳婦", meaning: "母乳をあげているお母さんのことです。")
+    ]
+
+    /// テキストに登場する用語の解説を、登録順に最大10件返す
+    static func glossaryEntries(in text: String) -> [GlossaryEntry] {
+        guard !text.isEmpty else { return [] }
+        let matched = glossary.filter { entry in
+            text.contains(entry.term) || entry.aliases.contains { text.contains($0) }
+        }
+        return Array(matched.prefix(10))
     }
 }
 

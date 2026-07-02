@@ -36,6 +36,7 @@ extension Color {
         switch severity {
         case "重大": return .appRed
         case "中等度": return .appOrange
+        case "注意": return .appOrange
         case "軽度": return .appYellow
         case "禁忌": return Color(hex: "8B0000")
         default: return .secondary
@@ -180,26 +181,13 @@ struct SearchHeaderView: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(hex: "FFE8F3"), Color(hex: "EEF3FF")],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 50, height: 50)
-                    .shadow(color: Color.appPink.opacity(0.25), radius: 8, x: 0, y: 4)
-
-                Image(systemName: "pills.fill")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [Color.appPink, Color.appIndigo],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-            }
+            // アプリアイコンと同じ「くすりん」キャラクター画像
+            Image("KusurinIcon")
+                .resizable()
+                .scaledToFill()
+                .frame(width: 50, height: 50)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(color: Color.appPink.opacity(0.25), radius: 8, x: 0, y: 4)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("くすりん")
@@ -256,6 +244,7 @@ struct FriendlyMedicineCard: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.colorScheme) private var colorScheme
     let med: Medicine
+    @State private var confirmRemoveFavorite = false
 
     var isFav: Bool { appState.favMedicines.contains(med.id) }
 
@@ -362,8 +351,14 @@ struct FriendlyMedicineCard: View {
 
                 // ハートボタン
                 Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.55)) {
-                        appState.toggleMed(med)
+                    if isFav {
+                        // 解除は誤タップの影響が大きいので確認を挟む
+                        confirmRemoveFavorite = true
+                    } else {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.55)) {
+                            appState.toggleMed(med)
+                        }
                     }
                 } label: {
                     Image(systemName: isFav ? "heart.fill" : "heart")
@@ -375,8 +370,25 @@ struct FriendlyMedicineCard: View {
                                 .fill(isFav ? Color.appPink.opacity(0.12) : Color(.systemGray6))
                         )
                         .scaleEffect(isFav ? 1.05 : 1.0)
+                        // HIG 推奨の 44pt タップ領域を確保（見た目は 34pt のまま）
+                        .frame(width: 44, height: 44)
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(isFav ? "お気に入りから削除" : "お気に入りに追加")
+                .confirmationDialog(
+                    "「\(med.brandName)」をお気に入りから削除しますか？",
+                    isPresented: $confirmRemoveFavorite,
+                    titleVisibility: .visible
+                ) {
+                    Button("削除する", role: .destructive) {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.55)) {
+                            appState.toggleMed(med)
+                        }
+                    }
+                    Button("キャンセル", role: .cancel) {}
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 14)
@@ -425,49 +437,17 @@ func categoryAccentColor(_ category: String) -> Color {
 struct KusurinLogoMark: View {
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(hex: "FFF2F7"), Color(hex: "FFF7E8"), Color(hex: "EEF5FF")],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 78, height: 78)
-
-                Circle()
-                    .fill(Color.white.opacity(0.92))
-                    .frame(width: 54, height: 54)
-
-                Capsule()
-                    .fill(Color.appPink)
-                    .frame(width: 18, height: 34)
-                    .offset(x: -6)
-
-                Capsule()
-                    .fill(Color(hex: "FFD66F"))
-                    .frame(width: 18, height: 34)
-                    .offset(x: 6)
-
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(Color.white.opacity(0.95))
-                    .frame(width: 5, height: 30)
-
-                Circle()
-                    .fill(Color(hex: "FFE8F1"))
-                    .frame(width: 14, height: 14)
-                    .offset(x: 18, y: 18)
-                    .overlay {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 7, weight: .bold))
-                            .foregroundStyle(Color.appPink)
-                    }
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.white.opacity(0.9), lineWidth: 1)
-            )
+            // アプリアイコンと同じ「くすりん」キャラクター画像
+            Image("KusurinIcon")
+                .resizable()
+                .scaledToFill()
+                .frame(width: 78, height: 78)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.white.opacity(0.9), lineWidth: 1)
+                )
+                .shadow(color: Color.appPink.opacity(0.25), radius: 8, x: 0, y: 4)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("くすりん")
