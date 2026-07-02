@@ -2,6 +2,9 @@
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 *.xcworkspace/xcshareddata/
+# ネストした .xcworkspace/.xcodeproj 配下のユーザー状態も無視する
+**/xcuserdata/
+*.xcuserstate
 DerivedData/
 *.ipa
 *.dSYM.zip
